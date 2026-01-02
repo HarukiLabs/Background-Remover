@@ -1,5 +1,5 @@
 /**
- * Image Processing Functions
+ * Image Processing Functions with AbortSignal Support
  * - Remove Background (AI-based)
  * - Remove Specific Color (Chroma Key)
  * - Blur Background
@@ -8,25 +8,48 @@
  * - Image compression before AI processing for large files
  * - OffscreenCanvas usage where available
  * - Progress callbacks for long operations
+ * - AbortSignal support for cancellation
  */
 
 import { removeBackground } from '@imgly/background-removal';
 import { compressForProcessing, shouldCompress } from './imageCompressor';
 
+// Helper to check abort and throw DOMException
+function checkAborted(signal?: AbortSignal): void {
+    if (signal?.aborted) {
+        throw new DOMException('Processing cancelled', 'AbortError');
+    }
+}
+
+// Helper for yielding to UI with abort check
+async function yieldWithAbortCheck(signal?: AbortSignal): Promise<void> {
+    await new Promise(resolve => setTimeout(resolve, 0));
+    checkAborted(signal);
+}
+
 // ============================================
 // MODE 1: REMOVE BACKGROUND ONLY (AI)
 // ============================================
-export async function removeBackgroundOnly(file: File): Promise<Blob> {
+export async function removeBackgroundOnly(
+    file: File,
+    signal?: AbortSignal
+): Promise<Blob> {
     console.log('🔄 Starting: Remove Background Only (AI)');
+    checkAborted(signal);
 
     // Compress large images before processing for better performance
     let processFile = file;
     if (shouldCompress(file)) {
         console.log('📦 Compressing large file before processing...');
         processFile = await compressForProcessing(file, { maxDimension: 2048 });
+        checkAborted(signal);
     }
 
+    // Note: @imgly/background-removal doesn't support AbortSignal directly
+    // We check before and after the call
     const result = await removeBackground(processFile);
+    checkAborted(signal);
+
     console.log('✅ Background removed successfully');
     return result;
 }
@@ -39,11 +62,13 @@ export async function removeBackgroundOnly(file: File): Promise<Blob> {
 export async function removeSpecificColor(
     file: File,
     targetColor: string,
-    tolerance: number = 30
+    tolerance: number = 30,
+    signal?: AbortSignal
 ): Promise<Blob> {
     console.log('🔄 Starting: Remove Color (Chroma Key)');
     console.log('   Target color:', targetColor);
     console.log('   Tolerance:', tolerance);
+    checkAborted(signal);
 
     // Step 1: Load original image
     const canvas = document.createElement('canvas');
@@ -51,6 +76,8 @@ export async function removeSpecificColor(
     if (!ctx) throw new Error('Failed to get canvas context');
 
     const img = await createImageBitmap(file);
+    checkAborted(signal);
+
     canvas.width = img.width;
     canvas.height = img.height;
     ctx.drawImage(img, 0, 0);
@@ -72,6 +99,9 @@ export async function removeSpecificColor(
     const totalPixels = data.length / 4;
 
     for (let startPixel = 0; startPixel < totalPixels; startPixel += CHUNK_SIZE) {
+        // Check abort at each chunk boundary
+        checkAborted(signal);
+
         const endPixel = Math.min(startPixel + CHUNK_SIZE, totalPixels);
 
         for (let pixel = startPixel; pixel < endPixel; pixel++) {
@@ -94,7 +124,7 @@ export async function removeSpecificColor(
         }
 
         // Yield to allow UI updates (every chunk)
-        await new Promise(resolve => setTimeout(resolve, 0));
+        await yieldWithAbortCheck(signal);
     }
 
     // Step 5: Put modified data back
@@ -103,8 +133,18 @@ export async function removeSpecificColor(
 
     // Return as PNG with transparency
     return new Promise((resolve, reject) => {
+        // Final abort check before blob creation
+        if (signal?.aborted) {
+            reject(new DOMException('Processing cancelled', 'AbortError'));
+            return;
+        }
+
         canvas.toBlob(
             (blob) => {
+                if (signal?.aborted) {
+                    reject(new DOMException('Processing cancelled', 'AbortError'));
+                    return;
+                }
                 if (blob) {
                     console.log('✅ PNG created with transparent areas');
                     resolve(blob);
@@ -124,15 +164,20 @@ export async function removeSpecificColor(
 // ============================================
 export async function blurBackgroundOnly(
     file: File,
-    blurAmount: number
+    blurAmount: number,
+    signal?: AbortSignal
 ): Promise<Blob> {
     console.log('🔄 Starting: Blur Background Only');
     console.log('   Blur amount:', blurAmount, 'px');
+    checkAborted(signal);
 
     // Step 1: Get subject mask using AI background removal
     console.log('   Step 1: Getting subject mask...');
     const maskBlob = await removeBackground(file);
+    checkAborted(signal);
+
     const maskImg = await createImageBitmap(maskBlob);
+    checkAborted(signal);
     console.log('   ✅ Subject mask obtained');
 
     // Step 2: Create mask canvas for alpha channel
@@ -148,6 +193,7 @@ export async function blurBackgroundOnly(
     // Step 3: Load ORIGINAL image (with background)
     console.log('   Step 2: Loading original image...');
     const originalImg = await createImageBitmap(file);
+    checkAborted(signal);
 
     // Step 4: Create SHARP version
     const sharpCanvas = document.createElement('canvas');
@@ -171,6 +217,7 @@ export async function blurBackgroundOnly(
     blurredCtx.drawImage(originalImg, 0, 0);
     blurredCtx.filter = 'none';
     const blurredData = blurredCtx.getImageData(0, 0, blurredCanvas.width, blurredCanvas.height);
+    checkAborted(signal);
 
     // Step 6: Composite using mask (chunked to prevent lag)
     console.log('   Step 4: Compositing...');
@@ -186,6 +233,9 @@ export async function blurBackgroundOnly(
     const totalPixels = maskData.data.length / 4;
 
     for (let startPixel = 0; startPixel < totalPixels; startPixel += CHUNK_SIZE) {
+        // Check abort at each chunk boundary
+        checkAborted(signal);
+
         const endPixel = Math.min(startPixel + CHUNK_SIZE, totalPixels);
 
         for (let pixel = startPixel; pixel < endPixel; pixel++) {
@@ -207,16 +257,25 @@ export async function blurBackgroundOnly(
             }
         }
 
-        // Yield to UI
-        await new Promise(resolve => setTimeout(resolve, 0));
+        // Yield to UI with abort check
+        await yieldWithAbortCheck(signal);
     }
 
     finalCtx.putImageData(finalData, 0, 0);
     console.log('✅ Blur applied to background only');
 
     return new Promise((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(new DOMException('Processing cancelled', 'AbortError'));
+            return;
+        }
+
         finalCanvas.toBlob(
             (blob) => {
+                if (signal?.aborted) {
+                    reject(new DOMException('Processing cancelled', 'AbortError'));
+                    return;
+                }
                 if (blob) {
                     console.log('✅ Final image created');
                     resolve(blob);
@@ -240,27 +299,36 @@ export interface ProcessingConfig {
     colorToRemove?: string;
     colorTolerance?: number;
     blurIntensity?: number;
+    signal?: AbortSignal;
 }
 
 export async function processImage(
     file: File,
     config: ProcessingConfig
 ): Promise<Blob> {
+    const { signal } = config;
+
     switch (config.mode) {
         case 'remove-bg':
-            return removeBackgroundOnly(file);
+            return removeBackgroundOnly(file, signal);
 
         case 'remove-color':
             return removeSpecificColor(
                 file,
                 config.colorToRemove || '#00FF00',
-                config.colorTolerance || 30
+                config.colorTolerance || 30,
+                signal
             );
 
         case 'blur-bg':
-            return blurBackgroundOnly(file, config.blurIntensity || 25);
+            return blurBackgroundOnly(file, config.blurIntensity || 25, signal);
 
         default:
             throw new Error(`Unknown mode: ${config.mode}`);
     }
+}
+
+// Helper to check if error is an AbortError
+export function isAbortError(error: unknown): boolean {
+    return error instanceof DOMException && error.name === 'AbortError';
 }

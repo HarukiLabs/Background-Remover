@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback, startTransition } from 'react';
-import { X, Scissors, Pipette, Sparkles, Plus, Trash2, Loader2, Eye, Download, Clock, History } from 'lucide-react';
-import { processImage, ProcessingConfig, ProcessingMode } from '@/lib/imageProcessing';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { X, Scissors, Pipette, Sparkles, Plus, Trash2, Loader2, Eye, Download, Clock, History, XCircle } from 'lucide-react';
+import { processImage, ProcessingConfig, ProcessingMode, isAbortError } from '@/lib/imageProcessing';
 import { useDebounce } from '@/hooks/useDebounce';
-import { ImageSkeleton } from '@/components/Skeleton';
+import { useAbortController } from '@/hooks/useAbortController';
 
 export interface ModeConfig {
     mode: ProcessingMode;
@@ -77,6 +77,8 @@ export default function ModeSelectionModal({
     const [history, setHistory] = useState<HistoryItem[]>([]);
     const [showHistory, setShowHistory] = useState(false);
 
+    // Abort controller for cancellation
+    const { getController, abort, isAborted } = useAbortController();
     const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
     // Debounced values for smoother slider controls
@@ -119,15 +121,25 @@ export default function ModeSelectionModal({
         // Use debounced values to avoid excessive processing
     }, [selectedMode, colorToRemove, debouncedColorTolerance, debouncedBlurIntensity]);
 
-    // Cleanup processed results on unmount to prevent memory leaks
+    // Cleanup on unmount
     useEffect(() => {
         return () => {
+            // Abort any ongoing processing
+            abort();
+            // Revoke all object URLs
             processedResults.forEach(r => URL.revokeObjectURL(r.previewUrl));
         };
     }, []);
 
     const processAllImages = async () => {
         if (!selectedMode) return;
+
+        // Cancel any previous processing
+        abort();
+
+        // Get new controller for this processing session
+        const controller = getController();
+        const signal = controller.signal;
 
         setIsProcessing(true);
         setProcessingProgress({ current: 0, total: files.length, percent: 0, stage: 'Starting...' });
@@ -143,11 +155,18 @@ export default function ModeSelectionModal({
             colorToRemove: selectedMode === 'remove-color' ? colorToRemove : undefined,
             colorTolerance: selectedMode === 'remove-color' ? colorTolerance : undefined,
             blurIntensity: selectedMode === 'blur-bg' ? blurIntensity : undefined,
+            signal,
         };
 
         console.log('🚀 Processing all images with config:', config);
 
         for (let i = 0; i < files.length; i++) {
+            // Check if cancelled before each file
+            if (signal.aborted) {
+                console.log('⛔ Processing cancelled by user');
+                break;
+            }
+
             const file = files[i];
             const basePercent = Math.round((i / files.length) * 100);
 
@@ -182,6 +201,12 @@ export default function ModeSelectionModal({
                     stage: `Completed ${i + 1}/${files.length}`
                 });
             } catch (error) {
+                // Handle AbortError separately - don't show as error
+                if (isAbortError(error)) {
+                    console.log('⛔ Processing aborted');
+                    break;
+                }
+
                 console.error('Failed to process', file.name, error);
                 setProcessingProgress(prev => ({
                     ...prev,
@@ -190,11 +215,27 @@ export default function ModeSelectionModal({
             }
         }
 
-        setProcessedResults(results);
+        // Only update results if not aborted
+        if (!signal.aborted) {
+            setProcessedResults(results);
+            setProcessingProgress({ current: files.length, total: files.length, percent: 100, stage: 'Complete!' });
+            console.log('✅ All images processed:', results.length);
+        } else {
+            // Clean up partial results on cancellation
+            results.forEach(r => URL.revokeObjectURL(r.previewUrl));
+            setProcessingProgress({ current: 0, total: 0, percent: 0, stage: 'Cancelled' });
+        }
+
         setIsProcessing(false);
-        setProcessingProgress({ current: files.length, total: files.length, percent: 100, stage: 'Complete!' });
-        console.log('✅ All images processed:', results.length);
     };
+
+    // Cancel processing
+    const handleCancelProcessing = useCallback(() => {
+        abort();
+        setIsProcessing(false);
+        setProcessingProgress({ current: 0, total: 0, percent: 0, stage: 'Cancelled' });
+        console.log('🛑 User cancelled processing');
+    }, [abort]);
 
     // Download a single result
     const downloadResult = (result: ProcessedResult) => {
@@ -270,25 +311,35 @@ export default function ModeSelectionModal({
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-start justify-center p-4 bg-black/90 backdrop-blur-sm overflow-y-auto">
-            <div className="relative w-full max-w-6xl bg-[#1A1A1A] rounded-2xl border border-white/10 shadow-2xl overflow-hidden my-4">
+        <div className="fixed inset-0 z-50 flex items-start justify-center p-2 sm:p-4 bg-black/90 backdrop-blur-sm overflow-y-auto">
+            {/* Processing overlay */}
+            {isProcessing && (
+                <div className="processing-overlay" />
+            )}
+
+            <div className="relative w-full max-w-6xl bg-[#1A1A1A] rounded-2xl border border-white/10 shadow-2xl overflow-hidden my-2 sm:my-4">
 
                 {/* Header */}
-                <div className="sticky top-0 z-10 flex items-center justify-between p-4 border-b border-white/10 bg-[#1A1A1A]">
-                    <div className="flex items-center gap-4">
-                        <h2 className="text-lg font-semibold text-white">
+                <div className="sticky top-0 z-10 flex items-center justify-between p-3 sm:p-4 border-b border-white/10 bg-[#1A1A1A]">
+                    <div className="flex items-center gap-2 sm:gap-4">
+                        <h2 className="text-base sm:text-lg font-semibold text-white">
                             📸 {files.length} Image{files.length > 1 ? 's' : ''}
                         </h2>
                         <button
                             onClick={() => setShowHistory(!showHistory)}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors ${showHistory ? 'bg-blue-600 text-white' : 'bg-white/10 text-gray-400 hover:text-white'
-                                }`}
+                            disabled={isProcessing}
+                            className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs sm:text-sm rounded-lg transition-colors min-h-[48px] ${showHistory ? 'bg-blue-600 text-white' : 'bg-white/10 text-gray-400 hover:text-white'
+                                } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
                             <History className="w-4 h-4" />
-                            History ({history.length})
+                            <span className="hidden sm:inline">History ({history.length})</span>
+                            <span className="sm:hidden">{history.length}</span>
                         </button>
                     </div>
-                    <button onClick={onCancel} className="p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white">
+                    <button
+                        onClick={isProcessing ? handleCancelProcessing : onCancel}
+                        className="p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white min-h-[48px] min-w-[48px] flex items-center justify-center"
+                    >
                         <X className="w-5 h-5" />
                     </button>
                 </div>
@@ -298,20 +349,25 @@ export default function ModeSelectionModal({
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-0">
 
                         {/* Left: Thumbnails */}
-                        <div className="p-4 border-r border-white/10 bg-black/20">
+                        <div className="p-3 sm:p-4 border-b lg:border-b-0 lg:border-r border-white/10 bg-black/20">
                             <div className="flex items-center justify-between mb-3">
                                 <span className="text-sm text-gray-400">Your Images</span>
-                                <button onClick={onAddMore} className="text-xs text-blue-400 flex items-center gap-1">
-                                    <Plus className="w-3 h-3" /> Add
+                                <button
+                                    onClick={onAddMore}
+                                    disabled={isProcessing}
+                                    className={`text-xs text-blue-400 flex items-center gap-1 min-h-[48px] px-2 ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                >
+                                    <Plus className="w-3 h-3" />
+                                    Add
                                 </button>
                             </div>
-                            <div className="grid grid-cols-3 gap-2">
+                            <div className="grid grid-cols-4 sm:grid-cols-3 gap-2 max-h-[30vh] lg:max-h-none overflow-y-auto scroll-smooth-mobile">
                                 {filePreviews.map((url, idx) => (
                                     <div
                                         key={idx}
-                                        onClick={() => setSelectedPreviewIndex(idx)}
-                                        className={`relative aspect-square rounded-lg overflow-hidden cursor-pointer border-2 ${selectedPreviewIndex === idx ? 'border-blue-500' : 'border-transparent'
-                                            }`}
+                                        onClick={() => !isProcessing && setSelectedPreviewIndex(idx)}
+                                        className={`relative aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all min-h-[48px] ${selectedPreviewIndex === idx ? 'border-blue-500 scale-105' : 'border-transparent'
+                                            } ${isProcessing ? 'opacity-70' : ''}`}
                                     >
                                         <img src={url} loading="lazy" className="w-full h-full object-cover" alt="" />
                                         {selectedPreviewIndex === idx && (
@@ -325,19 +381,19 @@ export default function ModeSelectionModal({
                         </div>
 
                         {/* Center: Preview */}
-                        <div className="p-4 flex flex-col">
+                        <div className="p-3 sm:p-4 flex flex-col">
                             <div className="text-sm text-gray-400 mb-2 flex items-center gap-2">
                                 👁️ Live Preview
                                 {isProcessing && (
-                                    <span className="flex items-center gap-1.5 text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full">
+                                    <span className="flex items-center gap-1.5 text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full animate-pulse">
                                         <Loader2 className="w-3 h-3 animate-spin" />
                                         <span className="font-medium">{processingProgress.percent}%</span>
-                                        <span className="text-blue-300/70">({processingProgress.current}/{processingProgress.total})</span>
+                                        <span className="text-blue-300/70 hidden sm:inline">({processingProgress.current}/{processingProgress.total})</span>
                                     </span>
                                 )}
                             </div>
 
-                            <div className="flex-1 flex items-center justify-center min-h-[300px] rounded-xl border border-white/10 bg-[#0a0a0a] overflow-hidden">
+                            <div className="flex-1 flex items-center justify-center min-h-[200px] sm:min-h-[300px] max-h-[50vh] lg:max-h-none rounded-xl border border-white/10 bg-[#0a0a0a] overflow-hidden">
                                 {!selectedMode && (
                                     <div className="text-center text-gray-500">
                                         <Pipette className="w-10 h-10 mx-auto mb-2 opacity-30" />
@@ -346,7 +402,7 @@ export default function ModeSelectionModal({
                                 )}
 
                                 {selectedMode && isProcessing && (
-                                    <div className="text-center text-gray-400 w-full px-8">
+                                    <div className="text-center text-gray-400 w-full px-4 sm:px-8">
                                         <Loader2 className="w-10 h-10 mx-auto mb-3 animate-spin text-blue-400" />
 
                                         {/* Percentage */}
@@ -362,8 +418,8 @@ export default function ModeSelectionModal({
                                         {/* Progress bar */}
                                         <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
                                             <div
-                                                className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-300 ease-out"
-                                                style={{ width: `${processingProgress.percent}%` }}
+                                                className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-300 ease-out will-change-transform"
+                                                style={{ transform: `translateX(${processingProgress.percent - 100}%)` }}
                                             />
                                         </div>
 
@@ -371,13 +427,22 @@ export default function ModeSelectionModal({
                                         <p className="text-xs text-gray-600 mt-2">
                                             {processingProgress.current} of {processingProgress.total} files
                                         </p>
+
+                                        {/* Cancel button */}
+                                        <button
+                                            onClick={handleCancelProcessing}
+                                            className="mt-4 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg flex items-center gap-2 mx-auto transition-colors min-h-[48px]"
+                                        >
+                                            <XCircle className="w-4 h-4" />
+                                            Cancel Processing
+                                        </button>
                                     </div>
                                 )}
 
                                 {selectedMode && !isProcessing && processedResults[selectedPreviewIndex] && (
                                     <img
                                         src={processedResults[selectedPreviewIndex].previewUrl}
-                                        className="max-w-full max-h-full object-contain"
+                                        className="max-w-full max-h-full object-contain transition-opacity duration-300"
                                         style={{
                                             background: selectedMode === 'remove-bg' || selectedMode === 'remove-color'
                                                 ? 'repeating-conic-gradient(#404040 0% 25%, #606060 0% 50%) 50% / 16px 16px'
@@ -385,24 +450,31 @@ export default function ModeSelectionModal({
                                         }}
                                     />
                                 )}
+
+                                {/* Skeleton loading state */}
+                                {selectedMode && !isProcessing && !processedResults[selectedPreviewIndex] && (
+                                    <div className="w-full h-full flex items-center justify-center">
+                                        <div className="w-3/4 h-3/4 rounded-xl bg-white/5 skeleton-wave" />
+                                    </div>
+                                )}
                             </div>
 
                             {processedResults.length > 0 && !isProcessing && (
-                                <div className="mt-3 p-2 bg-green-500/10 border border-green-500/30 rounded-lg text-center">
+                                <div className="mt-3 p-2 bg-green-500/10 border border-green-500/30 rounded-lg text-center transition-opacity duration-300">
                                     <p className="text-green-400 text-sm">✅ {processedResults.length} images ready!</p>
                                 </div>
                             )}
                         </div>
 
                         {/* Right: Mode Selection */}
-                        <div className="p-4 border-l border-white/10 space-y-3">
+                        <div className="p-3 sm:p-4 border-t lg:border-t-0 lg:border-l border-white/10 space-y-3">
                             <span className="text-sm text-gray-400">🎯 Select Mode</span>
 
                             {/* Mode 1: Remove BG */}
                             <div
-                                onClick={() => setSelectedMode('remove-bg')}
-                                className={`p-3 rounded-xl border cursor-pointer transition-all ${selectedMode === 'remove-bg' ? 'border-blue-500 bg-blue-500/10' : 'border-white/10 bg-white/5'
-                                    }`}
+                                onClick={() => !isProcessing && setSelectedMode('remove-bg')}
+                                className={`p-3 rounded-xl border cursor-pointer transition-all min-h-[60px] ${selectedMode === 'remove-bg' ? 'border-blue-500 bg-blue-500/10' : 'border-white/10 bg-white/5'
+                                    } ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'hover:border-blue-400/50'}`}
                             >
                                 <div className="flex items-center gap-2">
                                     <Scissors className="w-5 h-5 text-gray-400" />
@@ -413,9 +485,9 @@ export default function ModeSelectionModal({
 
                             {/* Mode 2: Remove Color */}
                             <div
-                                onClick={() => setSelectedMode('remove-color')}
+                                onClick={() => !isProcessing && setSelectedMode('remove-color')}
                                 className={`p-3 rounded-xl border cursor-pointer transition-all ${selectedMode === 'remove-color' ? 'border-purple-500 bg-purple-500/10' : 'border-white/10 bg-white/5'
-                                    }`}
+                                    } ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'hover:border-purple-400/50'}`}
                             >
                                 <div className="flex items-center gap-2">
                                     <Pipette className="w-5 h-5 text-gray-400" />
@@ -431,9 +503,10 @@ export default function ModeSelectionModal({
                                                 {CHROMA_PRESETS.map(c => (
                                                     <button
                                                         key={c.value}
-                                                        onClick={() => setColorToRemove(c.value)}
-                                                        className={`w-8 h-8 rounded-lg text-sm border-2 ${colorToRemove === c.value ? 'border-purple-400 scale-110' : 'border-white/20'
-                                                            }`}
+                                                        onClick={() => !isProcessing && setColorToRemove(c.value)}
+                                                        disabled={isProcessing}
+                                                        className={`w-10 h-10 sm:w-8 sm:h-8 rounded-lg text-sm border-2 transition-transform ${colorToRemove === c.value ? 'border-purple-400 scale-110' : 'border-white/20'
+                                                            } ${isProcessing ? 'opacity-50' : ''}`}
                                                         style={{ backgroundColor: c.value }}
                                                         title={c.label}
                                                     />
@@ -441,8 +514,9 @@ export default function ModeSelectionModal({
                                                 <input
                                                     type="color"
                                                     value={colorToRemove}
-                                                    onChange={e => setColorToRemove(e.target.value)}
-                                                    className="w-8 h-8 rounded-lg cursor-pointer"
+                                                    onChange={e => !isProcessing && setColorToRemove(e.target.value)}
+                                                    disabled={isProcessing}
+                                                    className="w-10 h-10 sm:w-8 sm:h-8 rounded-lg cursor-pointer"
                                                 />
                                             </div>
                                         </div>
@@ -453,7 +527,8 @@ export default function ModeSelectionModal({
                                                 min="5"
                                                 max="100"
                                                 value={colorTolerance}
-                                                onChange={e => setColorTolerance(Number(e.target.value))}
+                                                onChange={e => !isProcessing && setColorTolerance(Number(e.target.value))}
+                                                disabled={isProcessing}
                                                 className="w-full h-2 rounded-lg appearance-none bg-white/20"
                                             />
                                             <p className="text-xs text-gray-500">Higher = remove similar shades</p>
@@ -464,9 +539,9 @@ export default function ModeSelectionModal({
 
                             {/* Mode 3: Blur BG */}
                             <div
-                                onClick={() => setSelectedMode('blur-bg')}
+                                onClick={() => !isProcessing && setSelectedMode('blur-bg')}
                                 className={`p-3 rounded-xl border cursor-pointer transition-all ${selectedMode === 'blur-bg' ? 'border-cyan-500 bg-cyan-500/10' : 'border-white/10 bg-white/5'
-                                    }`}
+                                    } ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'hover:border-cyan-400/50'}`}
                             >
                                 <div className="flex items-center gap-2">
                                     <Sparkles className="w-5 h-5 text-gray-400" />
@@ -479,9 +554,10 @@ export default function ModeSelectionModal({
                                         {[10, 25, 50].map(v => (
                                             <button
                                                 key={v}
-                                                onClick={() => setBlurIntensity(v as 10 | 25 | 50)}
-                                                className={`flex-1 py-1.5 rounded-lg text-xs font-medium ${blurIntensity === v ? 'bg-cyan-600 text-white' : 'bg-white/10 text-gray-400'
-                                                    }`}
+                                                onClick={() => !isProcessing && setBlurIntensity(v as 10 | 25 | 50)}
+                                                disabled={isProcessing}
+                                                className={`flex-1 py-2 sm:py-1.5 rounded-lg text-xs font-medium min-h-[48px] sm:min-h-0 transition-colors ${blurIntensity === v ? 'bg-cyan-600 text-white' : 'bg-white/10 text-gray-400'
+                                                    } ${isProcessing ? 'opacity-50' : ''}`}
                                             >
                                                 {v === 10 ? 'Light' : v === 25 ? 'Medium' : 'Heavy'}
                                             </button>
@@ -493,13 +569,13 @@ export default function ModeSelectionModal({
                     </div>
                 ) : (
                     /* History Panel */
-                    <div className="p-4">
+                    <div className="p-3 sm:p-4">
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="text-white font-medium">📋 Processing History</h3>
                             {history.length > 0 && (
                                 <button
                                     onClick={clearHistory}
-                                    className="text-sm text-red-400 hover:text-red-300 flex items-center gap-1"
+                                    className="text-sm text-red-400 hover:text-red-300 flex items-center gap-1 min-h-[48px] px-2"
                                 >
                                     <Trash2 className="w-4 h-4" />
                                     Clear All
@@ -518,7 +594,7 @@ export default function ModeSelectionModal({
                                     <div key={item.id} className="bg-white/5 rounded-lg overflow-hidden border border-white/10">
                                         <div className="aspect-square bg-black/30 flex items-center justify-center">
                                             {item.previewUrl ? (
-                                                <img src={item.previewUrl} className="w-full h-full object-cover" />
+                                                <img src={item.previewUrl} className="w-full h-full object-cover" alt="" />
                                             ) : (
                                                 <span className="text-gray-500 text-xs">No preview</span>
                                             )}
@@ -528,7 +604,7 @@ export default function ModeSelectionModal({
                                             <p className="text-xs text-gray-500">{formatTime(item.timestamp)}</p>
                                             <button
                                                 onClick={() => reDownload(item)}
-                                                className="mt-1 w-full py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded"
+                                                className="mt-1 w-full py-2 sm:py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded min-h-[44px] sm:min-h-0"
                                             >
                                                 📥 Download
                                             </button>
@@ -540,20 +616,21 @@ export default function ModeSelectionModal({
                     </div>
                 )}
 
-                {/* Footer */}
+                {/* Footer - Sticky with safe area */}
                 {!showHistory && (
-                    <div className="sticky bottom-0 p-4 border-t border-white/10 bg-[#1A1A1A] flex gap-3">
+                    <div className="sticky bottom-0 p-3 sm:p-4 border-t border-white/10 bg-[#1A1A1A] flex gap-3 safe-area-bottom">
                         <button
                             onClick={onCancel}
-                            className="flex-1 py-3 text-gray-400 bg-white/5 rounded-xl"
+                            disabled={isProcessing}
+                            className={`flex-1 py-3 text-gray-400 bg-white/5 rounded-xl min-h-[52px] transition-colors ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'hover:bg-white/10'}`}
                         >
                             Cancel
                         </button>
                         <button
                             onClick={downloadAll}
                             disabled={processedResults.length === 0 || isProcessing}
-                            className={`flex-[2] py-3 rounded-xl font-semibold flex items-center justify-center gap-2 ${processedResults.length > 0 && !isProcessing
-                                ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white'
+                            className={`flex-[2] py-3 rounded-xl font-semibold flex items-center justify-center gap-2 min-h-[52px] transition-all ${processedResults.length > 0 && !isProcessing
+                                ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:opacity-90'
                                 : 'bg-white/10 text-gray-500 cursor-not-allowed'
                                 }`}
                         >

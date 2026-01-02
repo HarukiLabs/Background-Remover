@@ -281,3 +281,106 @@ body {
     -moz-osx-font-smoothing: grayscale;
   }
 }
+
+/* ============================================
+   Processing animations
+   ============================================ */
+@keyframes processing-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.processing-shimmer {
+  background: linear-gradient(90deg,
+      rgba(255, 255, 255, 0) 0%,
+      rgba(255, 255, 255, 0.1) 50%,
+      rgba(255, 255, 255, 0) 100%);
+  background-size: 200% 100%;
+  animation: processing-shimmer 1.5s ease-in-out infinite;
+}
+
+/* Processing overlay - dims background during processing */
+.processing-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(2px);
+  z-index: 40;
+  pointer-events: none;
+  animation: fade-in 0.2s ease-out;
+}
+
+/* Panel transitions for smooth collapsing */
+.panel-transition {
+  transition: opacity var(--transition-normal) ease,
+    transform var(--transition-normal) ease;
+  will-change: opacity, transform;
+}
+
+.panel-transition-enter {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.panel-transition-enter-active {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.panel-transition-exit {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.panel-transition-exit-active {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+/* Progress bar animation */
+@keyframes progress-pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.progress-bar-animated {
+  animation: progress-pulse 2s ease-in-out infinite;
+}
+
+/* Smooth image loading */
+.image-fade-in {
+  opacity: 0;
+  transition: opacity var(--transition-normal) ease;
+}
+
+.image-fade-in.loaded {
+  opacity: 1;
+}
+
+/* Touch feedback enhancement */
+@media (hover: none) and (pointer: coarse) {
+
+  button:active,
+  [role="button"]:active {
+    transform: scale(0.95);
+    transition: transform 50ms ease;
+  }
+
+  /* Larger touch targets on mobile */
+  .touch-target-lg {
+    min-height: 52px;
+    min-width: 52px;
+  }
+}
