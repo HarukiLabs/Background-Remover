@@ -65,11 +65,16 @@ export function applyFilters(
     const data = imageData.data;
 
     // Merge with defaults and apply intensity
+    const scaledParams: Partial<FilterParams> = {};
+    for (const key of Object.keys(params) as Array<keyof FilterParams>) {
+        const value = params[key];
+        if (value !== undefined) {
+            scaledParams[key] = value * intensity;
+        }
+    }
     const p: FilterParams = {
         ...DEFAULT_FILTER_PARAMS,
-        ...Object.fromEntries(
-            Object.entries(params).map(([k, v]) => [k, (v as number) * intensity])
-        ) as FilterParams
+        ...scaledParams
     };
 
     const brightnessMultiplier = 1 + p.brightness;

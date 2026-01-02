@@ -1,3 +1,4 @@
+/// <reference types="jest" />
 import '@testing-library/jest-dom';
 
 // Mock Web APIs not available in jsdom
