@@ -4,7 +4,7 @@
 
 **100% client-side background removal tool. Zero uploads. Completely free.**
 
-[Demo](https://your-demo-url.vercel.app) • [Report Bug](https://github.com/harukilabs/repo/issues)
+[Demo](https://your-demo-url.vercel.app) • [Report Bug](https://github.com/HarukiLabs/Background-Remover/issues)
 
 ---
 
