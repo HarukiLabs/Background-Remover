@@ -129,7 +129,7 @@ export default function QueueGrid() {
                                 {activeItems.length}
                             </span>
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                        <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-4">
                             {activeItems.map(item => (
                                 <QueueItem
                                     key={item.id}
@@ -150,7 +150,7 @@ export default function QueueGrid() {
                                 {finishedItems.length}
                             </span>
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                        <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-4">
                             {finishedItems.map(item => (
                                 <QueueItem key={item.id} item={item} onEdit={() => setEditingItem(item)} />
                             ))}

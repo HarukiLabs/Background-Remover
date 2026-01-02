@@ -1,8 +1,10 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, startTransition } from 'react';
 import { X, Scissors, Pipette, Sparkles, Plus, Trash2, Loader2, Eye, Download, Clock, History } from 'lucide-react';
 import { processImage, ProcessingConfig, ProcessingMode } from '@/lib/imageProcessing';
+import { useDebounce } from '@/hooks/useDebounce';
+import { ImageSkeleton } from '@/components/Skeleton';
 
 export interface ModeConfig {
     mode: ProcessingMode;
@@ -64,13 +66,22 @@ export default function ModeSelectionModal({
     // Processing state
     const [processedResults, setProcessedResults] = useState<ProcessedResult[]>([]);
     const [isProcessing, setIsProcessing] = useState(false);
-    const [processingProgress, setProcessingProgress] = useState({ current: 0, total: 0 });
+    const [processingProgress, setProcessingProgress] = useState({
+        current: 0,
+        total: 0,
+        percent: 0,
+        stage: 'Waiting...'
+    });
 
     // History
     const [history, setHistory] = useState<HistoryItem[]>([]);
     const [showHistory, setShowHistory] = useState(false);
 
     const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+    // Debounced values for smoother slider controls
+    const debouncedColorTolerance = useDebounce(colorTolerance, 300);
+    const debouncedBlurIntensity = useDebounce(blurIntensity, 300);
 
     // Generate file previews on mount
     useEffect(() => {
@@ -92,7 +103,7 @@ export default function ModeSelectionModal({
         }
     }, []);
 
-    // Auto-process when mode or settings change (debounced)
+    // Auto-process when mode or settings change (use debounced values)
     useEffect(() => {
         if (!selectedMode || files.length === 0) return;
 
@@ -100,18 +111,26 @@ export default function ModeSelectionModal({
 
         debounceRef.current = setTimeout(() => {
             processAllImages();
-        }, 500);
+        }, 300);
 
         return () => {
             if (debounceRef.current) clearTimeout(debounceRef.current);
         };
-    }, [selectedMode, colorToRemove, colorTolerance, blurIntensity]);
+        // Use debounced values to avoid excessive processing
+    }, [selectedMode, colorToRemove, debouncedColorTolerance, debouncedBlurIntensity]);
+
+    // Cleanup processed results on unmount to prevent memory leaks
+    useEffect(() => {
+        return () => {
+            processedResults.forEach(r => URL.revokeObjectURL(r.previewUrl));
+        };
+    }, []);
 
     const processAllImages = async () => {
         if (!selectedMode) return;
 
         setIsProcessing(true);
-        setProcessingProgress({ current: 0, total: files.length });
+        setProcessingProgress({ current: 0, total: files.length, percent: 0, stage: 'Starting...' });
 
         // Revoke old preview URLs
         processedResults.forEach(r => URL.revokeObjectURL(r.previewUrl));
@@ -130,7 +149,18 @@ export default function ModeSelectionModal({
 
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
-            setProcessingProgress({ current: i + 1, total: files.length });
+            const basePercent = Math.round((i / files.length) * 100);
+
+            // Update progress with stage info
+            setProcessingProgress({
+                current: i + 1,
+                total: files.length,
+                percent: basePercent,
+                stage: `Processing ${file.name.slice(0, 20)}...`
+            });
+
+            // Allow UI to update
+            await new Promise(resolve => setTimeout(resolve, 10));
 
             try {
                 const blob = await processImage(file, config);
@@ -142,13 +172,27 @@ export default function ModeSelectionModal({
                     blob,
                     previewUrl,
                 });
+
+                // Update percent after each file
+                const newPercent = Math.round(((i + 1) / files.length) * 100);
+                setProcessingProgress({
+                    current: i + 1,
+                    total: files.length,
+                    percent: newPercent,
+                    stage: `Completed ${i + 1}/${files.length}`
+                });
             } catch (error) {
                 console.error('Failed to process', file.name, error);
+                setProcessingProgress(prev => ({
+                    ...prev,
+                    stage: `⚠️ Failed: ${file.name.slice(0, 15)}...`
+                }));
             }
         }
 
         setProcessedResults(results);
         setIsProcessing(false);
+        setProcessingProgress({ current: files.length, total: files.length, percent: 100, stage: 'Complete!' });
         console.log('✅ All images processed:', results.length);
     };
 
@@ -269,7 +313,7 @@ export default function ModeSelectionModal({
                                         className={`relative aspect-square rounded-lg overflow-hidden cursor-pointer border-2 ${selectedPreviewIndex === idx ? 'border-blue-500' : 'border-transparent'
                                             }`}
                                     >
-                                        <img src={url} className="w-full h-full object-cover" />
+                                        <img src={url} loading="lazy" className="w-full h-full object-cover" alt="" />
                                         {selectedPreviewIndex === idx && (
                                             <div className="absolute inset-0 bg-blue-500/20 flex items-center justify-center">
                                                 <Eye className="w-4 h-4 text-white" />
@@ -285,9 +329,10 @@ export default function ModeSelectionModal({
                             <div className="text-sm text-gray-400 mb-2 flex items-center gap-2">
                                 👁️ Live Preview
                                 {isProcessing && (
-                                    <span className="flex items-center gap-1 text-blue-400">
+                                    <span className="flex items-center gap-1.5 text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full">
                                         <Loader2 className="w-3 h-3 animate-spin" />
-                                        {processingProgress.current}/{processingProgress.total}
+                                        <span className="font-medium">{processingProgress.percent}%</span>
+                                        <span className="text-blue-300/70">({processingProgress.current}/{processingProgress.total})</span>
                                     </span>
                                 )}
                             </div>
@@ -301,9 +346,31 @@ export default function ModeSelectionModal({
                                 )}
 
                                 {selectedMode && isProcessing && (
-                                    <div className="text-center text-gray-400">
-                                        <Loader2 className="w-10 h-10 mx-auto mb-2 animate-spin" />
-                                        <p>Processing...</p>
+                                    <div className="text-center text-gray-400 w-full px-8">
+                                        <Loader2 className="w-10 h-10 mx-auto mb-3 animate-spin text-blue-400" />
+
+                                        {/* Percentage */}
+                                        <p className="text-2xl font-bold text-white mb-1">
+                                            {processingProgress.percent}%
+                                        </p>
+
+                                        {/* Stage info */}
+                                        <p className="text-sm text-gray-500 mb-3 truncate">
+                                            {processingProgress.stage}
+                                        </p>
+
+                                        {/* Progress bar */}
+                                        <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                                            <div
+                                                className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-300 ease-out"
+                                                style={{ width: `${processingProgress.percent}%` }}
+                                            />
+                                        </div>
+
+                                        {/* File count */}
+                                        <p className="text-xs text-gray-600 mt-2">
+                                            {processingProgress.current} of {processingProgress.total} files
+                                        </p>
                                     </div>
                                 )}
 
@@ -486,8 +553,8 @@ export default function ModeSelectionModal({
                             onClick={downloadAll}
                             disabled={processedResults.length === 0 || isProcessing}
                             className={`flex-[2] py-3 rounded-xl font-semibold flex items-center justify-center gap-2 ${processedResults.length > 0 && !isProcessing
-                                    ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white'
-                                    : 'bg-white/10 text-gray-500 cursor-not-allowed'
+                                ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white'
+                                : 'bg-white/10 text-gray-500 cursor-not-allowed'
                                 }`}
                         >
                             <Download className="w-5 h-5" />

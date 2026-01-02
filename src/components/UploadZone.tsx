@@ -100,9 +100,10 @@ export default function UploadZone({ onFileSelect, isProcessing, disabled = fals
                 onClick={() => !disabled && fileInputRef.current?.click()}
                 className={`
           relative group cursor-pointer
-          border-2 border-dashed rounded-2xl p-12
-          transition-all duration-300 ease-in-out
+          border-2 border-dashed rounded-2xl p-8 md:p-12
+          transition-all duration-300 ease-in-out gpu-accelerated
           flex flex-col items-center justify-center text-center
+          active:scale-[0.98]
           ${isDragging
                         ? 'border-blue-500 bg-blue-500/10 scale-[1.02]'
                         : disabled

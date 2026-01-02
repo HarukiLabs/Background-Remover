@@ -5,7 +5,7 @@ import { QueueItemState, QueueContextType } from '@/types/queue';
 import { db } from '@/lib/db';
 import { workerPool } from '@/lib/workerPool';
 import { v4 as uuidv4 } from 'uuid';
-import { fileToDataURL } from '@/lib/imageUtils';
+import { generateThumbnail } from '@/lib/imageUtils';
 import { ProcessingMode } from '@/lib/editor/EditorState';
 
 const QueueContext = createContext<QueueContextType | null>(null);
@@ -52,8 +52,8 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
         for (const file of files) {
             const id = uuidv4();
 
-            // Generate thumbnail (optimize: use worker or offscreen canvas later)
-            const thumbnailDataUrl = await fileToDataURL(file); // For now full size, optimized later
+            // Generate optimized thumbnail (300px) for memory efficiency instead of full size data URL
+            const thumbnailDataUrl = await generateThumbnail(file, 300);
             // Convert DataURL back to Blob for storage if needed, or just store file
             // Ideally generate small thumbnail
 

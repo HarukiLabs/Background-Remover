@@ -87,6 +87,7 @@ export default function RootLayout({
       </head>
       <body
         className={`${inter.variable} antialiased gradient-bg min-h-screen`}
+        suppressHydrationWarning
       >
         <Providers>
           {children}

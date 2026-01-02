@@ -69,7 +69,7 @@ export default function Home() {
   };
 
   return (
-    <main className="flex min-h-screen flex-col items-center p-4 md:p-8 md:pb-24 max-w-7xl mx-auto">
+    <main className="flex min-h-screen flex-col items-center p-3 sm:p-4 md:p-8 pb-20 md:pb-24 max-w-7xl mx-auto safe-area-bottom">
       <Header />
 
       {/* Hidden file input for "Add More" functionality */}
