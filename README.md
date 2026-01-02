@@ -2,13 +2,21 @@
 
 A powerful, **100% client-side** background removal tool. All processing happens in your browser - no server uploads, completely free and private.
 
-![Demo](./public/og-image.png)
-
 ---
 
 ## 📺 Video Tutorial
 
-> Coming soon! A video walkthrough showing how to use all features.
+![Tutorial Demo](./public/tutorial.webp)
+
+---
+
+## � Screenshots
+
+### Main Interface
+![Main Interface](./public/screenshot-main.png)
+
+### Processing Mode
+![Processing](./public/screenshot-processing.png)
 
 ---
 
@@ -27,15 +35,15 @@ A powerful, **100% client-side** background removal tool. All processing happens
 |------|-------------|--------|
 | ✂️ **Remove Background (AI)** | Intelligent AI-powered background removal | Transparent PNG |
 | 🎨 **Remove Color (Chroma Key)** | Remove specific color (like green screen) | Transparent PNG |
-| �️ **Blur Background** | Keep subject sharp, blur background | JPEG with bokeh effect |
+| 🌫️ **Blur Background** | Keep subject sharp, blur background | JPEG with bokeh effect |
 
 ---
 
 ## ✨ Key Features
 
-- � **100% Private** - No server uploads, everything runs in your browser
+- 🔒 **100% Private** - No server uploads, everything runs in your browser
 - ⚡ **Live Preview** - See results before downloading
-- � **Batch Processing** - Process multiple images at once
+- 📦 **Batch Processing** - Process multiple images at once
 - 📋 **History** - Re-download previous results anytime
 - 📱 **Mobile Ready** - Works on any device
 
