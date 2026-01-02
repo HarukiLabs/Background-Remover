@@ -13,10 +13,11 @@ A powerful, **100% client-side** background removal tool. All processing happens
 ## � Screenshots
 
 ### Main Interface
-![Main Interface](./public/screenshot-main.png)
+<img width="400" alt="Main Interface" src="https://github.com/user-attachments/assets/f9a6da65-e88a-4d72-8419-361e7d7ab919" />
 
 ### Processing Mode
-![Processing](./public/screenshot-processing.png)
+<img width="400" alt="Processing Mode" src="https://github.com/user-attachments/assets/a6c43a31-463a-4fad-9768-d69c9db680b0" />
+
 
 ---
 
