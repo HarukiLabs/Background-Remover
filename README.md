@@ -6,7 +6,7 @@ A powerful, **100% client-side** background removal tool. All processing happens
 
 ## 📺 Video Tutorial
 
-![Tutorial Demo](./public/tutorial.webp)
+<img width="400" alt="Results" src="https://github.com/user-attachments/assets/61cf8e63-9d1f-4459-b5ab-b7e6e87228b6" />
 
 ---
 
